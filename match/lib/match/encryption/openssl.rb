@@ -10,22 +10,28 @@ require_relative '../module'
 module Match
   module Encryption
     class OpenSSL < Interface
+      DEFAULT_FILETYPES_TO_ENCRYPT = "cer,p12,mobileprovision"
+
       attr_accessor :keychain_name
 
       attr_accessor :working_directory
 
+      attr_accessor :filetypes_to_encrypt
+
       def self.configure(params)
         return self.new(
           keychain_name: params[:keychain_name],
-          working_directory: params[:working_directory]
+          working_directory: params[:working_directory],
+          filetypes_to_encrypt: params[:filetypes_to_encrypt] || DEFAULT_FILETYPES_TO_ENCRYPT
         )
       end
 
       # @param keychain_name: The identifier used to store the passphrase in the Keychain
       # @param working_directory: The path to where the certificates are stored
-      def initialize(keychain_name: nil, working_directory: nil)
+      def initialize(keychain_name: nil, working_directory: nil, filetypes_to_encrypt: nil)
         self.keychain_name = keychain_name
         self.working_directory = working_directory
+        self.filetypes_to_encrypt = filetypes_to_encrypt || DEFAULT_FILETYPES_TO_ENCRYPT
       end
 
       def encrypt_files
@@ -71,7 +77,7 @@ module Match
       private
 
       def iterate(source_path)
-        Dir[File.join(source_path, "**", "*.{cer,p12,mobileprovision}")].each do |path|
+        Dir[File.join(source_path, "**", "*.{#{filetypes_to_encrypt}}")].each do |path|
           next if File.directory?(path)
           yield(path)
         end

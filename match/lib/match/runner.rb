@@ -53,11 +53,16 @@ module Match
       # Init the encryption only after the `storage.download` was called to have the right working directory
       encryption = Encryption.for_storage_mode(params[:storage_mode], {
         git_url: params[:git_url],
-        working_directory: storage.working_directory
+        working_directory: storage.working_directory,
+        filetypes_to_encrypt: params[:filetypes_to_encrypt]
       })
       encryption.decrypt_files if encryption
 
-      if params[:readonly]
+      if params[:sync_encrypted_arbitrary_directory]
+        sync_encrypted_arbitrary_directory_path = params[:sync_encrypted_arbitrary_directory]
+        sync_encrypted_arbitrary_directory_path += '/' unless sync_encrypted_arbitrary_directory_path.end_with?('/')
+
+      elsif params[:readonly]
         # In readonly mode, we still want to see if the user provided a team_id
         # see `prefixed_working_directory` comments for more details
         self.currently_used_team_id = params[:team_id]
@@ -70,34 +75,55 @@ module Match
         end
       end
 
-      if params[:app_identifier].kind_of?(Array)
-        app_identifiers = params[:app_identifier]
-      else
-        app_identifiers = params[:app_identifier].to_s.split(/\s*,\s*/).uniq
-      end
+      if sync_encrypted_arbitrary_directory_path
+        # Setup paths and directories
+        arbitrary_directory_name = File.basename sync_encrypted_arbitrary_directory_path
+        storage_directory = "#{storage.working_directory}/#{arbitrary_directory_name}/"
+        FileUtils.mkdir_p storage_directory
 
-      # sometimes we get an array with arrays, this is a bug. To unblock people using match, I suggest we flatten!
-      # then in the future address the root cause of https://github.com/fastlane/fastlane/issues/11324
-      app_identifiers.flatten!
-
-      # Verify the App ID (as we don't want 'match' to fail at a later point)
-      if spaceship
-        app_identifiers.each do |app_identifier|
-          spaceship.bundle_identifier_exists(username: params[:username], app_identifier: app_identifier)
+        # First copy newly downloaded files to arbitrary directory
+        Dir["#{storage_directory}*"].each do |storage_filepath|
+          arbitrary_filepath = storage_filepath.gsub storage_directory, sync_encrypted_arbitrary_directory_path
+          FileUtils.cp storage_filepath, arbitrary_filepath
         end
-      end
 
-      # Certificate
-      cert_id = fetch_certificate(params: params, working_directory: storage.working_directory)
-      spaceship.certificate_exists(username: params[:username], certificate_id: cert_id) if spaceship
+        # Copy the files back to the storage directory
+        Dir["#{sync_encrypted_arbitrary_directory_path}*"].each do |arbitrary_filepath|
+          storage_path = arbitrary_filepath.gsub sync_encrypted_arbitrary_directory_path, storage_directory
+          FileUtils.cp arbitrary_filepath, storage_path
+          files_to_commit << storage_path
+        end
 
-      # Provisioning Profiles
-      app_identifiers.each do |app_identifier|
-        loop do
-          break if fetch_provisioning_profile(params: params,
-                                      certificate_id: cert_id,
-                                      app_identifier: app_identifier,
-                                   working_directory: storage.working_directory)
+      else
+        if params[:app_identifier].kind_of?(Array)
+          app_identifiers = params[:app_identifier]
+        else
+          app_identifiers = params[:app_identifier].to_s.split(/\s*,\s*/).uniq
+        end
+
+        # sometimes we get an array with arrays, this is a bug. To unblock people using match, I suggest we flatten!
+        # then in the future address the root cause of https://github.com/fastlane/fastlane/issues/11324
+        app_identifiers.flatten!
+
+        # Verify the App ID (as we don't want 'match' to fail at a later point)
+        if spaceship
+          app_identifiers.each do |app_identifier|
+            spaceship.bundle_identifier_exists(username: params[:username], app_identifier: app_identifier)
+          end
+        end
+
+        # Certificate
+        cert_id = fetch_certificate(params: params, working_directory: storage.working_directory)
+        spaceship.certificate_exists(username: params[:username], certificate_id: cert_id) if spaceship
+
+        # Provisioning Profiles
+        app_identifiers.each do |app_identifier|
+          loop do
+            break if fetch_provisioning_profile(params: params,
+                                        certificate_id: cert_id,
+                                        app_identifier: app_identifier,
+                                    working_directory: storage.working_directory)
+          end
         end
       end
 
@@ -106,17 +132,27 @@ module Match
         storage.save_changes!(files_to_commit: self.files_to_commit)
       end
 
-      # Print a summary table for each app_identifier
-      app_identifiers.each do |app_identifier|
-        TablePrinter.print_summary(app_identifier: app_identifier, type: params[:type], platform: params[:platform])
+      if sync_encrypted_arbitrary_directory_path
+        puts "Encrypted and uploaded directory :: #{sync_encrypted_arbitrary_directory_path} ::"
+        files_to_commit.each { |filepath| puts filepath }
+        UI.success("All requested files have been encrypted and uploaded 🙌".green)
+      else
+        # Print a summary table for each app_identifier
+        app_identifiers.each do |app_identifier|
+          TablePrinter.print_summary(app_identifier: app_identifier, type: params[:type], platform: params[:platform])
+        end
+        UI.success("All required keys, certificates and provisioning profiles are installed 🙌".green)
       end
 
-      UI.success("All required keys, certificates and provisioning profiles are installed 🙌".green)
     rescue Spaceship::Client::UnexpectedResponse, Spaceship::Client::InvalidUserCredentialsError, Spaceship::Client::NoUserCredentialsError => ex
-      UI.error("An error occurred while verifying your certificates and profiles with the Apple Developer Portal.")
-      UI.error("If you already have your certificates stored in git, you can run `fastlane match` in readonly mode")
-      UI.error("to just install the certificates and profiles without accessing the Dev Portal.")
-      UI.error("To do so, just pass `readonly: true` to your match call.")
+      if sync_encrypted_arbitrary_directory_path
+        UI.error("An error occurred while attempting to encrypt or sync the requested directory.")
+      else
+        UI.error("An error occurred while verifying your certificates and profiles with the Apple Developer Portal.")
+        UI.error("If you already have your certificates stored in git, you can run `fastlane match` in readonly mode")
+        UI.error("to just install the certificates and profiles without accessing the Dev Portal.")
+        UI.error("To do so, just pass `readonly: true` to your match call.")
+      end
       raise ex
     ensure
       storage.clear_changes if storage

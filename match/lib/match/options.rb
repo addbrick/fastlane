@@ -16,6 +16,14 @@ module Match
 
       [
         # main
+        FastlaneCore::ConfigItem.new(key: :sync_encrypted_arbitrary_directory,
+                                     env_name: "MATCH_sync_encrypted_arbitrary_directory",
+                                     description: "A path to a directory you want to encrypt and sync, skipping anything related to profiles or certificates. This is NOT recursive, only syncs files at the root",
+                                     optional: true),
+        FastlaneCore::ConfigItem.new(key: :filetypes_to_encrypt,
+                                     env_name: "MATCH_FILETYPES_TO_ENCRYPT",
+                                     description: "Comma separated list of filetypes. This will be used to decide which files should be encrypted/decrypted in the git repository",
+                                     default_value: "cer,p12,mobileprovision"),
         FastlaneCore::ConfigItem.new(key: :type,
                                      env_name: "MATCH_TYPE",
                                      description: "Define the profile type, can be #{Match.environments.join(', ')}",
