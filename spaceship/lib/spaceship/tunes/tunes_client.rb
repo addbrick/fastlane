@@ -38,8 +38,8 @@ module Spaceship
             'ipad' => [1024, 768],
             'ipad105' => [2224, 1668],
             'ipadPro' => [2732, 2048],
-            'iPadPro11' => [2388, 1668],
-            'iPadPro129' => [2732, 2048]
+            'ipadPro11' => [2388, 1668],
+            'ipadPro129' => [2732, 2048]
         }
 
         r = resolutions[device]
@@ -258,6 +258,11 @@ module Spaceship
 
     def app_details(app_id)
       r = request(:get, "ra/apps/#{app_id}/details")
+      parse_response(r, 'data')
+    end
+
+    def bundle_details(app_id)
+      r = request(:get, "ra/appbundles/metadetail/#{app_id}")
       parse_response(r, 'data')
     end
 
@@ -868,6 +873,21 @@ module Spaceship
       du_client.upload_trailer_preview(app_version, upload_trailer_preview, content_provider_id, sso_token_for_image, device)
     end
 
+    #####################################################
+    # @!review attachment file
+    #####################################################
+    # Uploads a attachment file
+    # @param app_version (AppVersion): The version of your app(must be edit version)
+    # @param upload_attachment_file (file): File to upload
+    # @return [JSON] the response
+    def upload_app_review_attachment(app_version, upload_attachment_file)
+      raise "app_version is required" unless app_version
+      raise "app_version must be live version" if app_version.is_live?
+      raise "upload_attachment_file is required" unless upload_attachment_file
+
+      du_client.upload_app_review_attachment(app_version, upload_attachment_file, content_provider_id, sso_token_for_image)
+    end
+
     # Fetches the App Version Reference information from ITC
     # @return [AppVersionRef] the response
     def ref_data
@@ -1191,6 +1211,12 @@ module Spaceship
     def load_iap(app_id: nil, purchase_id: nil)
       r = request(:get, "ra/apps/#{app_id}/iaps/#{purchase_id}")
       parse_response(r, 'data')
+    end
+
+    # Submit the In-App-Purchase for review
+    def submit_iap!(app_id: nil, purchase_id: nil)
+      r = request(:post, "ra/apps/#{app_id}/iaps/#{purchase_id}/submission")
+      handle_itc_response(r)
     end
 
     # Loads the full In-App-Purchases-Family

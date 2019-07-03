@@ -12,20 +12,23 @@ module Frameit
   # Currently the class is 2 lines too long. Reevaluate refactoring when it's length changes significantly
   class Editor # rubocop:disable Metrics/ClassLength
     attr_accessor :screenshot # reference to the screenshot object to fetch the path, title, etc.
+    attr_accessor :debug_mode
+    attr_accessor :frame_path
     attr_accessor :frame # the frame of the device
     attr_accessor :image # the current image used for editing
     attr_accessor :space_to_device
 
-    def initialize(screenshot)
+    def initialize(screenshot, debug_mode = false)
       @screenshot = screenshot
+      self.debug_mode = debug_mode
     end
 
     def frame!
       prepare_image
 
-      frame = load_frame
-      if frame # Mac doesn't need a frame
-        self.frame = MiniMagick::Image.open(frame)
+      @frame_path = load_frame
+      if @frame_path # Mac doesn't need a frame
+        self.frame = MiniMagick::Image.open(@frame_path)
         # Rotate the frame according to the device orientation
         self.frame.rotate(self.rotation_for_device_orientation)
       elsif self.class == Editor
@@ -69,7 +72,7 @@ module Frameit
     private
 
     def store_result
-      output_path = screenshot.path.gsub('.png', '_framed.png').gsub('.PNG', '_framed.png')
+      output_path = screenshot.output_path
       image.format("png")
       image.write(output_path)
       Helper.hide_loading_indicator
@@ -84,6 +87,26 @@ module Frameit
       rotation = self.rotation_for_device_orientation
       frame.rotate(-rotation)
       @image.rotate(-rotation)
+
+      # Debug Mode: Add filename to frame
+      if self.debug_mode
+        filename = File.basename(@frame_path, ".*")
+        filename.sub!('Apple', '') # remove 'Apple'
+
+        width = screenshot.size[0]
+        font_size = width / 20 # magic number that works well
+
+        offset_top = offset['offset'].split("+")[2].to_f
+        annotate_offset = "+0+#{offset_top}" # magic number that works semi well
+
+        frame.combine_options do |c|
+          c.gravity('North')
+          c.undercolor('#00000080')
+          c.fill('white')
+          c.pointsize(font_size)
+          c.annotate(annotate_offset.to_s, filename.to_s)
+        end
+      end
 
       @image = frame.composite(image, "png") do |c|
         c.compose("DstOver")
@@ -170,7 +193,8 @@ module Frameit
     def horizontal_frame_padding
       padding = fetch_config['padding']
       if padding.kind_of?(String) && padding.split('x').length == 2
-        padding = padding.split('x')[0].to_i
+        padding = padding.split('x')[0]
+        padding = padding.to_i unless padding.end_with?('%')
       end
       return scale_padding(padding)
     end
@@ -179,7 +203,8 @@ module Frameit
     def vertical_frame_padding
       padding = fetch_config['padding']
       if padding.kind_of?(String) && padding.split('x').length == 2
-        padding = padding.split('x')[1].to_i
+        padding = padding.split('x')[1]
+        padding = padding.to_i unless padding.end_with?('%')
       end
       return scale_padding(padding)
     end
