@@ -505,9 +505,55 @@ module Spaceship
           # User Credentials are wrong
           raise InvalidUserCredentialsError.new, "Invalid username and password combination. Used '#{user}' as the username."
         elsif response.status == 412 && AUTH_TYPES.include?(response.body["authType"])
-          # Need to acknowledge Apple ID and Privacy statement - https://github.com/fastlane/fastlane/issues/12577
-          # Looking for status of 412 might be enough but might be safer to keep looking only at what is being reported
-          raise AppleIDAndPrivacyAcknowledgementNeeded.new, "Need to acknowledge to Apple's Apple ID and Privacy statement. Please manually log into https://appleid.apple.com (or https://appstoreconnect.apple.com) to acknowledge the statement."
+          location_header = response.headers['location']
+          if location_header.include?('repair')
+            apple_scnt = response.headers['scnt']
+            raise Tunes::Error.new, 'Missing scnt Header!' if apple_scnt.nil?
+
+            apple_auth_attributes = response.headers['x-apple-auth-attributes']
+            raise Tunes::Error.new, 'Missing Apple Auth Attributes Header!' if apple_auth_attributes.nil?
+
+            apple_id_session_id = response.headers['x-apple-id-session-id']
+            raise Tunes::Error.new, 'Missing Session ID Header!' if apple_id_session_id.nil?
+
+            repair_session_token = response.headers['x-apple-repair-session-token']
+            raise Tunes::Error.new, 'Missing Repair Session Token Header!' if repair_session_token.nil?
+
+            if (matches = location_header.match(/widgetKey=([^&]+)/))
+              repair_widget_key = matches[1]
+            end
+            raise Tunes::Error.new, 'Missing Repair Widget Key!' if repair_widget_key.nil?
+
+            # Get Repair Widget from Location Header
+            repair_widget_response = request :get, location_header
+
+            # Parse Repair Session ID from Widget Response
+            if (matches = repair_widget_response.body.match(/"sessionId":"([^"]+)"/))
+              repair_session_id = matches[1]
+            end
+            raise Tunes::Error.new, 'Could not get Session ID from Widget!' if repair_session_id.nil?
+
+            # Let Apple know we completed the security review
+            response = request(:post) do |req|
+              req.url('https://idmsa.apple.com/appleauth/auth/repair/complete')
+              req.headers['Content-Type'] = 'application/json'
+              req.headers['X-Requested-With'] = 'XMLHttpRequest'
+              req.headers['Accept'] = 'application/json, text/javascript'
+              req.headers['scnt'] = apple_scnt
+              req.headers['X-Apple-Repair-Session-Token'] = repair_session_token
+              req.headers['X-Apple-Widget-Key'] = repair_widget_key
+              req.headers['X-Apple-Auth-Attributes'] = apple_auth_attributes
+            end
+
+            # Finsh login process
+            fetch_olympus_session
+
+            return response
+          else
+            # Need to acknowledge Apple ID and Privacy statement - https://github.com/fastlane/fastlane/issues/12577
+            # Looking for status of 412 might be enough but might be safer to keep looking only at what is being reported
+            raise AppleIDAndPrivacyAcknowledgementNeeded.new, "Need to acknowledge to Apple's Apple ID and Privacy statement. Please manually log into https://appleid.apple.com (or https://appstoreconnect.apple.com) to acknowledge the statement."
+          end
         elsif (response['Set-Cookie'] || "").include?("itctx")
           raise "Looks like your Apple ID is not enabled for App Store Connect, make sure to be able to login online"
         else
